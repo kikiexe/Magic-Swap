@@ -1,0 +1,26 @@
+# OS & IDE
+.DS_Store
+.vscode/
+.idea/
+*.log
+
+# Dependencies
+node_modules/
+
+# Environment Variables
+.env
+.env.*
+
+# Smart Contracts (Sui/Move)
+smart-contracts/build/
+smart-contracts/move_coverage/
+*.mv
+*.mvd
+
+# Frontend (Vite/React)
+frontend/dist/
+frontend/coverage/
+
+# Documentation
+magic-swap-structure.md
+narasi.md
