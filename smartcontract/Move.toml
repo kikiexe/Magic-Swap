@@ -1,0 +1,8 @@
+[package]
+name = "magic_swap"
+
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/mainnet" }
+
+[addresses]
+magic_swap = "0x0"
