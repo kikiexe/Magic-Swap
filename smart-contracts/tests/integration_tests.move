@@ -1,5 +1,5 @@
 #[test_only]
-module magic_swap::updated_logic_tests {
+module magic_swap::integration_tests {
     use sui::test_scenario::{Self, Scenario};
     use sui::coin;
     use sui::sui::SUI;
@@ -171,4 +171,3 @@ module magic_swap::updated_logic_tests {
         test_scenario::end(scenario);
     }
 }
-
