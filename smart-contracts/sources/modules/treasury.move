@@ -1,62 +1,26 @@
 module magic_swap::treasury {
-    use sui::coin::{Self, Coin};
     use sui::balance::{Self, Balance};
-    use sui::object::{Self, UID};
-    use sui::transfer;
-    use sui::tx_context::{Self, TxContext};
 
-    // --- Errors ---
-    const EInsufficientBalance: u64 = 0;
+    /// Memastikan payout tidak melebihi 10% dari isi Treasury
+    public fun check_safety_cap<T>(
+        house_balance: &Balance<T>, 
+        payout_amount: u64, 
+        wager_amount: u64
+    ): u64 {
+        // Jika pemain kalah atau seri, tidak perlu pengecekan cap
+        if (payout_amount <= wager_amount) return payout_amount;
 
-    // --- Objects ---
-    public struct Treasury<phantom T> has key {
-        id: UID,
-        balance: Balance<T>,
-    }
+        let profit_to_pay = payout_amount - wager_amount;
+        let house_val = balance::value(house_balance);
+        
+        // Batas maksimal profit adalah 10% dari total isi kas (Blueprint)
+        let max_profit_allowed = (house_val * 10) / 100;
 
-    public struct TreasuryCap has key, store {
-        id: UID,
-    }
-
-    // --- Functions ---
-    public fun create_treasury<T>(initial_fund: Coin<T>, ctx: &mut TxContext) {
-        let treasury = Treasury<T> {
-            id: object::new(ctx),
-            balance: initial_fund.into_balance(),
-        };
-        transfer::share_object(treasury);
-
-        let cap = TreasuryCap {
-            id: object::new(ctx),
-        };
-        transfer::public_transfer(cap, ctx.sender());
-    }
-
-    public fun deposit<T>(t: &mut Treasury<T>, coin: Coin<T>) {
-        balance::join(&mut t.balance, coin.into_balance());
-    }
-
-    public fun deposit_balance<T>(t: &mut Treasury<T>, balance: Balance<T>) {
-        balance::join(&mut t.balance, balance);
-    }
-
-    public fun withdraw<T>(
-        _: &TreasuryCap,
-        t: &mut Treasury<T>,
-        amount: u64,
-        ctx: &mut TxContext
-    ): Coin<T> {
-        assert!(balance::value(&t.balance) >= amount, EInsufficientBalance);
-        let b = balance::split(&mut t.balance, amount);
-        coin::from_balance(b, ctx)
-    }
-
-    public fun value<T>(t: &Treasury<T>): u64 {
-        balance::value(&t.balance)
-    }
-
-    public(package) fun take_balance<T>(t: &mut Treasury<T>, amount: u64): Balance<T> {
-        assert!(balance::value(&t.balance) >= amount, EInsufficientBalance);
-        balance::split(&mut t.balance, amount)
+        if (profit_to_pay > max_profit_allowed) {
+            // Jika melebihi cap, berikan modal + 10% treasury
+            wager_amount + max_profit_allowed
+        } else {
+            payout_amount
+        }
     }
 }

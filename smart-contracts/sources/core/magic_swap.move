@@ -1,36 +1,26 @@
 module magic_swap::game {
     use sui::coin::{Self, Coin};
-    use sui::balance;
+    use sui::balance::{Self, Balance};
     use sui::random::Random;
     use sui::event;
-    use sui::object::{Self, UID};
-    use sui::transfer;
-    use sui::tx_context::{Self, TxContext};
-
-    use magic_swap::probability_engine::{Self, Outcome};
-    use magic_swap::loss_cap;
+    
+    // Memanggil modul pendukung yang sudah kita buat
+    use magic_swap::randomness;
+    use magic_swap::probability_engine;
     use magic_swap::treasury;
-    use magic_swap::reward_pool;
-
-    // --- Errors ---
-    const EInsufficientTreasuryBalance: u64 = 0;
-    const EInvalidAmount: u64 = 1;
 
     // --- Events ---
     public struct OutcomeEvent has copy, drop {
         player: address,
         wager: u64,
         payout: u64,
-        outcome_tier: u8, // 0: Loss, 1: Small, 2: Medium, 3: Jackpot, 4: Miracle
-        multiplier: u64,
-        is_capped: bool,
+        outcome: u8,
     }
 
     // --- Objects ---
-    /// Lightweight game metadata object.
-    /// Actual funds live in `treasury::Treasury<T>` and optional `reward_pool::RewardPool<T>`.
-    public struct Game<phantom T> has key {
+    public struct GameHouse<phantom T> has key {
         id: UID,
+        house: Balance<T>,
         admin: address,
     }
 
@@ -40,131 +30,78 @@ module magic_swap::game {
 
     // --- Init ---
     fun init(ctx: &mut TxContext) {
-        let admin_cap = AdminCap {
-            id: object::new(ctx),
-        };
+        let admin_cap = AdminCap { id: object::new(ctx) };
         transfer::transfer(admin_cap, ctx.sender());
     }
 
     // --- Admin Functions ---
-    /// Create a new game. The admin is the transaction sender.
-    /// Initial funds should be placed into a separate `treasury::Treasury<T>`
-    /// by calling `treasury::create_treasury` in the same PTB.
-    public fun create_game<T>(
-        _: &AdminCap,
-        ctx: &mut TxContext
-    ) {
-        let game = Game<T> {
+    public fun create_game<T>(_: &AdminCap, ctx: &mut TxContext) {
+        let game = GameHouse<T> {
             id: object::new(ctx),
+            house: balance::zero(),
             admin: ctx.sender(),
         };
         transfer::share_object(game);
     }
 
-    /// Convenience wrapper: deposit into a game treasury.
-    public fun deposit<T>(_: &Game<T>, t: &mut treasury::Treasury<T>, coin: Coin<T>) {
-        treasury::deposit(t, coin);
+    public fun deposit<T>(game: &mut GameHouse<T>, coin: Coin<T>) {
+        balance::join(&mut game.house, coin.into_balance());
     }
 
-    /// Convenience wrapper: withdraw from a game treasury via `TreasuryCap`.
+    // Gunakan allow(lint) hanya sekali di sini
     #[allow(lint(self_transfer))]
     public fun withdraw<T>(
-        _: &AdminCap,
-        cap: &treasury::TreasuryCap,
-        t: &mut treasury::Treasury<T>,
-        amount: u64,
+        _: &AdminCap, 
+        game: &mut GameHouse<T>, 
+        amount: u64, 
         ctx: &mut TxContext
     ) {
-        let withdrawn_coin = treasury::withdraw(cap, t, amount, ctx);
-        transfer::public_transfer(withdrawn_coin, ctx.sender());
+        assert!(balance::value(&game.house) >= amount, 0); 
+        let coin = coin::take(&mut game.house, amount, ctx);
+        transfer::public_transfer(coin, ctx.sender());
     }
 
     // --- Core Gameplay ---
-    entry fun swap<T>(
-        game: &mut Game<T>,
-        t: &mut treasury::Treasury<T>,
-        rp: &mut reward_pool::RewardPool<T>,
-        r: &Random,
-        coin: Coin<T>,
-        ctx: &mut TxContext
-    ) {
-        // 1. Resolve Outcome
-        let outcome = probability_engine::resolve(r, ctx);
-        
-        // 2. Execute Swap Logic
-        do_swap(game, t, rp, outcome, coin, ctx);
-    }
-
-    // --- Internal Logic ---
-    #[allow(lint(self_transfer))]
-    fun do_swap<T>(
-        _: &mut Game<T>,
-        t: &mut treasury::Treasury<T>,
-        rp: &mut reward_pool::RewardPool<T>,
-        outcome: Outcome,
-        coin: Coin<T>,
+    // Menggunakan Random Native Sui dengan proteksi linter
+    #[allow(lint(public_entry, public_random))]
+    public entry fun play<T>(
+        game: &mut GameHouse<T>, 
+        r: &Random, 
+        coin: Coin<T>, 
         ctx: &mut TxContext
     ) {
         let wager_amount = coin.value();
-        assert!(wager_amount > 0, EInvalidAmount);
-
         let mut wager_balance = coin.into_balance();
-        let multiplier = probability_engine::get_multiplier(&outcome);
         
-        // 2. Calculate Payout
-        // Multiplier is scaled by 100 (e.g. 105 = 1.05x)
-        let desired_payout = (wager_amount as u128 * (multiplier as u128) / 100) as u64;
+        // Mengambil angka acak 0-999
+        let mut gen = randomness::get_generator(r, ctx);
+        let roll = randomness::roll_dice(&mut gen);
 
-        // 3. Safety Valve Check (Loss Cap / Profit Cap) via `loss_cap` helper.
-        let treasury_before = treasury::value(t);
-        let (payout_amount, is_capped) =
-            loss_cap::cap_payout_10_percent(treasury_before, wager_amount, desired_payout);
+        // Menghitung hadiah berdasarkan Golden Math di Blueprint
+        let (multiplier_bps, outcome_type) = probability_engine::calculate_outcome(roll);
+        let ideal_payout = (wager_amount * multiplier_bps) / 100;
 
-        // 4. Settle Funds against external treasury
-        if (payout_amount > wager_amount) {
-            // Player won, pull profit from treasury
-            let profit = payout_amount - wager_amount;
-            assert!(treasury::value(t) >= profit, EInsufficientTreasuryBalance);
+        // Validasi Safety Valve 10% agar bandar tidak bangkrut
+        let final_payout = treasury::check_safety_cap(&game.house, ideal_payout, wager_amount);
 
-            let profit_balance = treasury::take_balance(t, profit);
-            balance::join(&mut wager_balance, profit_balance);
-        } else {
-            // Player lost (or breakeven), excess goes to treasury
-            if (wager_amount > payout_amount) {
-                let loss = wager_amount - payout_amount;
-                let loss_balance = balance::split(&mut wager_balance, loss);
-                treasury::deposit_balance(t, loss_balance);
-            }
+        // Proses pembagian dana
+        if (final_payout > wager_amount) {
+            let diff = final_payout - wager_amount;
+            balance::join(&mut wager_balance, balance::split(&mut game.house, diff));
+        } else if (wager_amount > final_payout) {
+            let diff = wager_amount - final_payout;
+            balance::join(&mut game.house, balance::split(&mut wager_balance, diff));
         };
 
-        let treasury_after = treasury::value(t);
-        reward_pool::record_pnl(rp, treasury_before, treasury_after, ctx);
+        // Mengirim koin hasil permainan ke user
+        transfer::public_transfer(coin::from_balance(wager_balance, ctx), ctx.sender());
 
-        // 5. Transfer to User
-        let payout_coin = coin::from_balance(wager_balance, ctx);
-        transfer::public_transfer(payout_coin, ctx.sender());
-
-        // 6. Emit Event
         event::emit(OutcomeEvent {
             player: ctx.sender(),
             wager: wager_amount,
-            payout: payout_amount,
-            outcome_tier: probability_engine::get_tier(&outcome),
-            multiplier: multiplier,
-            is_capped: is_capped,
+            payout: final_payout,
+            outcome: outcome_type,
         });
-    }
-
-    #[test_only]
-    public fun swap_for_testing<T>(
-        game: &mut Game<T>,
-        t: &mut treasury::Treasury<T>,
-        rp: &mut reward_pool::RewardPool<T>,
-        outcome: Outcome,
-        coin: Coin<T>,
-        ctx: &mut TxContext
-    ) {
-        do_swap(game, t, rp, outcome, coin, ctx);
     }
 
     #[test_only]
