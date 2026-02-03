@@ -8,6 +8,8 @@ module magic_swap::integration_tests {
     use magic_swap::game::{Self, GameHouse};
     use magic_swap::admin::{AdminCap};
     use magic_swap::emergency::{EmergencyStatus};
+    use magic_swap::fee_manager::{FeeVault};
+    use magic_swap::user_stats::{UserStatsRegistry};
 
     // ==================== HELPERS ====================
     fun user(): address { @0xA }
@@ -17,10 +19,10 @@ module magic_swap::integration_tests {
     fun setup_game_environment(scenario: &mut Scenario) {
         let ctx = test_scenario::ctx(scenario);
         
-        // 1. Inisialisasi kontrak (mint AdminCap)
+        // 1. Inisialisasi kontrak (mint AdminCap + EmergencyStatus + UserStatsRegistry)
         game::init_for_testing(ctx);
         
-        // 2. Buat GameHouse (Treasury terintegrasi) sebagai Admin
+        // 2. Buat GameHouse + FeeVault sebagai Admin
         test_scenario::next_tx(scenario, admin());
         let admin_cap = test_scenario::take_from_sender<AdminCap>(scenario);
         game::create_game<SUI>(&admin_cap, test_scenario::ctx(scenario));
@@ -49,14 +51,26 @@ module magic_swap::integration_tests {
         test_scenario::next_tx(&mut scenario, user());
         {
             let mut game_obj = test_scenario::take_shared<GameHouse<SUI>>(&scenario);
+            let mut fee_vault = test_scenario::take_shared<FeeVault<SUI>>(&scenario);
+            let mut stats_registry = test_scenario::take_shared<UserStatsRegistry>(&scenario);
             let status = test_scenario::take_shared<EmergencyStatus>(&scenario);
             let r_obj = test_scenario::take_shared<Random>(&scenario);
             let wager = coin::mint_for_testing<SUI>(500, test_scenario::ctx(&mut scenario));
             
-            // Panggil fungsi play utama
-            game::play<SUI>(&mut game_obj, &status, &r_obj, wager, test_scenario::ctx(&mut scenario));
+            // Panggil fungsi play utama dengan semua parameter
+            game::play<SUI>(
+                &mut game_obj, 
+                &mut fee_vault,
+                &mut stats_registry,
+                &status, 
+                &r_obj, 
+                wager, 
+                test_scenario::ctx(&mut scenario)
+            );
             
             test_scenario::return_shared(game_obj);
+            test_scenario::return_shared(fee_vault);
+            test_scenario::return_shared(stats_registry);
             test_scenario::return_shared(status);
             test_scenario::return_shared(r_obj);
         };
@@ -65,8 +79,7 @@ module magic_swap::integration_tests {
         test_scenario::next_tx(&mut scenario, user());
         {
             let payout_coin = test_scenario::take_from_sender<Coin<SUI>>(&scenario);
-            // Pastikan sistem melindungi kas bandar (Max profit 10% dari 1000 = 100. Total payout 500+100=600)
-            // Note: If user lost, payout is 300 (60% of 500). If won jackpot, capped at 600.
+            // Net wager after 1% fee = 495. Loss = 297, Small win = 520, capped win = 595
             assert!(coin::value(&payout_coin) <= 600, 1); 
             test_scenario::return_to_sender(&scenario, payout_coin);
         };

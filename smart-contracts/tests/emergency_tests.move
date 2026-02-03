@@ -8,6 +8,8 @@ module magic_swap::emergency_tests {
     use magic_swap::game::{Self, GameHouse};
     use magic_swap::admin::{AdminCap};
     use magic_swap::emergency::{Self, EmergencyStatus};
+    use magic_swap::fee_manager::{FeeVault};
+    use magic_swap::user_stats::{UserStatsRegistry};
 
     // ==================== TEST ADDRESSES ====================
     const ADMIN: address = @0xAD;
@@ -16,11 +18,11 @@ module magic_swap::emergency_tests {
     // ==================== HELPERS ====================
     
     fun setup_full_environment(scenario: &mut Scenario) {
-        // 1. Init contract (creates AdminCap + EmergencyStatus)
+        // 1. Init contract (creates AdminCap + EmergencyStatus + UserStatsRegistry)
         ts::next_tx(scenario, ADMIN);
         game::init_for_testing(ts::ctx(scenario));
         
-        // 2. Create GameHouse
+        // 2. Create GameHouse + FeeVault
         ts::next_tx(scenario, ADMIN);
         let admin_cap = ts::take_from_sender<AdminCap>(scenario);
         game::create_game<SUI>(&admin_cap, ts::ctx(scenario));
@@ -148,15 +150,19 @@ module magic_swap::emergency_tests {
         ts::next_tx(&mut scenario, PLAYER);
         {
             let mut game_obj = ts::take_shared<GameHouse<SUI>>(&scenario);
+            let mut fee_vault = ts::take_shared<FeeVault<SUI>>(&scenario);
+            let mut stats_registry = ts::take_shared<UserStatsRegistry>(&scenario);
             let status = ts::take_shared<EmergencyStatus>(&scenario);
             let random_obj = ts::take_shared<random::Random>(&scenario);
             
             let wager = coin::mint_for_testing<SUI>(100, ts::ctx(&mut scenario));
             
             // Should succeed (system not paused)
-            game::play(&mut game_obj, &status, &random_obj, wager, ts::ctx(&mut scenario));
+            game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &status, &random_obj, wager, ts::ctx(&mut scenario));
             
             ts::return_shared(game_obj);
+            ts::return_shared(fee_vault);
+            ts::return_shared(stats_registry);
             ts::return_shared(status);
             ts::return_shared(random_obj);
         };
@@ -195,15 +201,19 @@ module magic_swap::emergency_tests {
         ts::next_tx(&mut scenario, PLAYER);
         {
             let mut game_obj = ts::take_shared<GameHouse<SUI>>(&scenario);
+            let mut fee_vault = ts::take_shared<FeeVault<SUI>>(&scenario);
+            let mut stats_registry = ts::take_shared<UserStatsRegistry>(&scenario);
             let status = ts::take_shared<EmergencyStatus>(&scenario);
             let random_obj = ts::take_shared<random::Random>(&scenario);
             
             let wager = coin::mint_for_testing<SUI>(100, ts::ctx(&mut scenario));
             
             // This should ABORT with code 100 (ESystemPaused)
-            game::play(&mut game_obj, &status, &random_obj, wager, ts::ctx(&mut scenario));
+            game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &status, &random_obj, wager, ts::ctx(&mut scenario));
             
             ts::return_shared(game_obj);
+            ts::return_shared(fee_vault);
+            ts::return_shared(stats_registry);
             ts::return_shared(status);
             ts::return_shared(random_obj);
         };
@@ -240,13 +250,17 @@ module magic_swap::emergency_tests {
         ts::next_tx(&mut scenario, PLAYER);
         {
             let mut game_obj = ts::take_shared<GameHouse<SUI>>(&scenario);
+            let mut fee_vault = ts::take_shared<FeeVault<SUI>>(&scenario);
+            let mut stats_registry = ts::take_shared<UserStatsRegistry>(&scenario);
             let status = ts::take_shared<EmergencyStatus>(&scenario);
             let random_obj = ts::take_shared<random::Random>(&scenario);
             
             let wager = coin::mint_for_testing<SUI>(100, ts::ctx(&mut scenario));
-            game::play(&mut game_obj, &status, &random_obj, wager, ts::ctx(&mut scenario));
+            game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &status, &random_obj, wager, ts::ctx(&mut scenario));
             
             ts::return_shared(game_obj);
+            ts::return_shared(fee_vault);
+            ts::return_shared(stats_registry);
             ts::return_shared(status);
             ts::return_shared(random_obj);
         };
