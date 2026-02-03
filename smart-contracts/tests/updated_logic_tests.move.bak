@@ -1,0 +1,129 @@
+#[test_only]
+module magic_swap::updated_logic_tests {
+    use sui::test_scenario::{Self, Scenario};
+    use sui::coin;
+    use sui::sui::SUI;
+    use magic_swap::game::{Self, Game, AdminCap};
+    use magic_swap::probability_engine::{Self, Outcome};
+
+    // --- Helpers ---
+    fun user(): address { @0xA }
+    fun admin(): address { @0xB }
+
+    fun start_game(scenario: &mut Scenario) {
+        let ctx = test_scenario::ctx(scenario);
+        game::init_for_testing(ctx);
+    }
+
+    // --- Tests ---
+
+    #[test]
+    fun test_loss_refund_logic() {
+        let mut scenario = test_scenario::begin(admin());
+        start_game(&mut scenario);
+        
+        test_scenario::next_tx(&mut scenario, admin());
+        {
+            let mut game = test_scenario::take_shared<Game>(&scenario);
+            let coin = coin::mint_for_testing<SUI>(1000, test_scenario::ctx(&mut scenario));
+            game::deposit(&mut game, coin);
+            test_scenario::return_shared(game);
+        };
+
+        test_scenario::next_tx(&mut scenario, user());
+        {
+            let mut game = test_scenario::take_shared<Game>(&scenario);
+            let wager = coin::mint_for_testing<SUI>(100, test_scenario::ctx(&mut scenario));
+            
+            // Create LOSS outcome (Tier 0, Multiplier 60 -> 0.6x)
+            let outcome = probability_engine::create_outcome_for_testing(0, 60);
+            
+            game::swap_for_testing(&mut game, outcome, wager, test_scenario::ctx(&mut scenario));
+            
+            test_scenario::return_shared(game);
+        };
+
+        // Assert Refund = 60
+        test_scenario::next_tx(&mut scenario, user());
+        {
+            let coin = test_scenario::take_from_sender<coin::Coin<SUI>>(&scenario);
+            assert!(coin::value(&coin) == 60, 0); // 100 * 0.6 = 60
+            test_scenario::return_to_sender(&scenario, coin);
+        };
+        test_scenario::end(scenario);
+    }
+
+    #[test]
+    fun test_small_win_logic() {
+        let mut scenario = test_scenario::begin(admin());
+        start_game(&mut scenario);
+        
+        // Fund 1000
+        test_scenario::next_tx(&mut scenario, admin());
+        {
+            let mut game = test_scenario::take_shared<Game>(&scenario);
+            let coin = coin::mint_for_testing<SUI>(1000, test_scenario::ctx(&mut scenario));
+            game::deposit(&mut game, coin);
+            test_scenario::return_shared(game);
+        };
+
+        test_scenario::next_tx(&mut scenario, user());
+        {
+            let mut game = test_scenario::take_shared<Game>(&scenario);
+            let wager = coin::mint_for_testing<SUI>(100, test_scenario::ctx(&mut scenario));
+            
+            // Small Win (Tier 1, Multiplier 105 -> 1.05x)
+            let outcome = probability_engine::create_outcome_for_testing(1, 105);
+            game::swap_for_testing(&mut game, outcome, wager, test_scenario::ctx(&mut scenario));
+            test_scenario::return_shared(game);
+        };
+
+        // Assert 105
+        test_scenario::next_tx(&mut scenario, user());
+        {
+            let coin = test_scenario::take_from_sender<coin::Coin<SUI>>(&scenario);
+            assert!(coin::value(&coin) == 105, 1);
+            test_scenario::return_to_sender(&scenario, coin);
+        };
+        test_scenario::end(scenario);
+    }
+
+    #[test]
+    fun test_safety_valve_trigger() {
+        let mut scenario = test_scenario::begin(admin());
+        start_game(&mut scenario);
+        
+        // Treasury = 1000. Cap = 100 (10%).
+        test_scenario::next_tx(&mut scenario, admin());
+        {
+            let mut game = test_scenario::take_shared<Game>(&scenario);
+            let coin = coin::mint_for_testing<SUI>(1000, test_scenario::ctx(&mut scenario));
+            game::deposit(&mut game, coin);
+            test_scenario::return_shared(game);
+        };
+
+        test_scenario::next_tx(&mut scenario, user());
+        {
+            let mut game = test_scenario::take_shared<Game>(&scenario);
+            let wager = coin::mint_for_testing<SUI>(100, test_scenario::ctx(&mut scenario));
+            
+            // Miracle Win (50x)
+            // Wager 100 -> Payout 5000. Profit 4900.
+            // Max Profit = 1000 / 10 = 100.
+            // Result should be Wager (100) + Max Profit (100) = 200.
+            
+            let outcome = probability_engine::create_outcome_for_testing(4, 5000);
+            game::swap_for_testing(&mut game, outcome, wager, test_scenario::ctx(&mut scenario));
+            test_scenario::return_shared(game);
+        };
+
+        // Assert result is CAPPED at 200
+        test_scenario::next_tx(&mut scenario, user());
+        {
+            let coin = test_scenario::take_from_sender<coin::Coin<SUI>>(&scenario);
+            assert!(coin::value(&coin) == 200, 2); 
+            test_scenario::return_to_sender(&scenario, coin);
+        };
+        test_scenario::end(scenario);
+    }
+}
