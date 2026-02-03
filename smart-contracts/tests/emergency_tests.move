@@ -1,0 +1,285 @@
+#[test_only]
+module magic_swap::emergency_tests {
+    use sui::test_scenario::{Self as ts, Scenario};
+    use sui::coin;
+    use sui::sui::SUI;
+    use sui::random;
+
+    use magic_swap::game::{Self, GameHouse};
+    use magic_swap::admin::{AdminCap};
+    use magic_swap::emergency::{Self, EmergencyStatus};
+
+    // ==================== TEST ADDRESSES ====================
+    const ADMIN: address = @0xAD;
+    const PLAYER: address = @0xA1;
+
+    // ==================== HELPERS ====================
+    
+    fun setup_full_environment(scenario: &mut Scenario) {
+        // 1. Init contract (creates AdminCap + EmergencyStatus)
+        ts::next_tx(scenario, ADMIN);
+        game::init_for_testing(ts::ctx(scenario));
+        
+        // 2. Create GameHouse
+        ts::next_tx(scenario, ADMIN);
+        let admin_cap = ts::take_from_sender<AdminCap>(scenario);
+        game::create_game<SUI>(&admin_cap, ts::ctx(scenario));
+        ts::return_to_sender(scenario, admin_cap);
+
+        // 3. Fund house
+        ts::next_tx(scenario, ADMIN);
+        let mut game_obj = ts::take_shared<GameHouse<SUI>>(scenario);
+        let funding = coin::mint_for_testing<SUI>(10000, ts::ctx(scenario));
+        game::deposit(&mut game_obj, funding);
+        ts::return_shared(game_obj);
+
+        // 4. Initialize Random object
+        ts::next_tx(scenario, @0x0);
+        random::create_for_testing(ts::ctx(scenario));
+    }
+
+    // ==================== TESTS ====================
+
+    #[test]
+    fun test_emergency_status_created() {
+        let mut scenario = ts::begin(ADMIN);
+        
+        // Init creates EmergencyStatus
+        game::init_for_testing(ts::ctx(&mut scenario));
+        
+        ts::next_tx(&mut scenario, ADMIN);
+        {
+            let status = ts::take_shared<EmergencyStatus>(&scenario);
+            
+            // Should start unpaused
+            assert!(!emergency::is_paused(&status), 0);
+            
+            ts::return_shared(status);
+        };
+        
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_admin_can_pause() {
+        let mut scenario = ts::begin(ADMIN);
+        game::init_for_testing(ts::ctx(&mut scenario));
+        
+        ts::next_tx(&mut scenario, ADMIN);
+        {
+            let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
+            
+            // Initially unpaused
+            assert!(!emergency::is_paused(&status), 0);
+            
+            // Admin pauses
+            emergency::pause(&admin_cap, &mut status);
+            
+            // Now paused
+            assert!(emergency::is_paused(&status), 1);
+            
+            ts::return_to_sender(&scenario, admin_cap);
+            ts::return_shared(status);
+        };
+        
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_admin_can_resume() {
+        let mut scenario = ts::begin(ADMIN);
+        game::init_for_testing(ts::ctx(&mut scenario));
+        
+        ts::next_tx(&mut scenario, ADMIN);
+        {
+            let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
+            
+            // Pause first
+            emergency::pause(&admin_cap, &mut status);
+            assert!(emergency::is_paused(&status), 0);
+            
+            // Then resume
+            emergency::resume(&admin_cap, &mut status);
+            assert!(!emergency::is_paused(&status), 1);
+            
+            ts::return_to_sender(&scenario, admin_cap);
+            ts::return_shared(status);
+        };
+        
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_admin_can_toggle() {
+        let mut scenario = ts::begin(ADMIN);
+        game::init_for_testing(ts::ctx(&mut scenario));
+        
+        ts::next_tx(&mut scenario, ADMIN);
+        {
+            let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
+            
+            // Start: unpaused
+            assert!(!emergency::is_paused(&status), 0);
+            
+            // Toggle -> paused
+            emergency::toggle(&admin_cap, &mut status);
+            assert!(emergency::is_paused(&status), 1);
+            
+            // Toggle -> unpaused
+            emergency::toggle(&admin_cap, &mut status);
+            assert!(!emergency::is_paused(&status), 2);
+            
+            ts::return_to_sender(&scenario, admin_cap);
+            ts::return_shared(status);
+        };
+        
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_play_succeeds_when_not_paused() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_full_environment(&mut scenario);
+        
+        // Player plays when system active
+        ts::next_tx(&mut scenario, PLAYER);
+        {
+            let mut game_obj = ts::take_shared<GameHouse<SUI>>(&scenario);
+            let status = ts::take_shared<EmergencyStatus>(&scenario);
+            let random_obj = ts::take_shared<random::Random>(&scenario);
+            
+            let wager = coin::mint_for_testing<SUI>(100, ts::ctx(&mut scenario));
+            
+            // Should succeed (system not paused)
+            game::play(&mut game_obj, &status, &random_obj, wager, ts::ctx(&mut scenario));
+            
+            ts::return_shared(game_obj);
+            ts::return_shared(status);
+            ts::return_shared(random_obj);
+        };
+        
+        // Verify player received payout
+        ts::next_tx(&mut scenario, PLAYER);
+        {
+            let payout = ts::take_from_sender<coin::Coin<SUI>>(&scenario);
+            // Payout should exist (either win or loss refund)
+            assert!(coin::value(&payout) > 0, 0);
+            ts::return_to_sender(&scenario, payout);
+        };
+        
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 100, location = magic_swap::emergency)]
+    fun test_play_fails_when_paused() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_full_environment(&mut scenario);
+        
+        // Admin pauses system
+        ts::next_tx(&mut scenario, ADMIN);
+        {
+            let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
+            
+            emergency::pause(&admin_cap, &mut status);
+            
+            ts::return_to_sender(&scenario, admin_cap);
+            ts::return_shared(status);
+        };
+        
+        // Player tries to play (should FAIL)
+        ts::next_tx(&mut scenario, PLAYER);
+        {
+            let mut game_obj = ts::take_shared<GameHouse<SUI>>(&scenario);
+            let status = ts::take_shared<EmergencyStatus>(&scenario);
+            let random_obj = ts::take_shared<random::Random>(&scenario);
+            
+            let wager = coin::mint_for_testing<SUI>(100, ts::ctx(&mut scenario));
+            
+            // This should ABORT with code 100 (ESystemPaused)
+            game::play(&mut game_obj, &status, &random_obj, wager, ts::ctx(&mut scenario));
+            
+            ts::return_shared(game_obj);
+            ts::return_shared(status);
+            ts::return_shared(random_obj);
+        };
+        
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_play_succeeds_after_resume() {
+        let mut scenario = ts::begin(ADMIN);
+        setup_full_environment(&mut scenario);
+        
+        // Admin pauses
+        ts::next_tx(&mut scenario, ADMIN);
+        {
+            let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
+            emergency::pause(&admin_cap, &mut status);
+            ts::return_to_sender(&scenario, admin_cap);
+            ts::return_shared(status);
+        };
+        
+        // Admin resumes
+        ts::next_tx(&mut scenario, ADMIN);
+        {
+            let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
+            emergency::resume(&admin_cap, &mut status);
+            ts::return_to_sender(&scenario, admin_cap);
+            ts::return_shared(status);
+        };
+        
+        // Player plays successfully
+        ts::next_tx(&mut scenario, PLAYER);
+        {
+            let mut game_obj = ts::take_shared<GameHouse<SUI>>(&scenario);
+            let status = ts::take_shared<EmergencyStatus>(&scenario);
+            let random_obj = ts::take_shared<random::Random>(&scenario);
+            
+            let wager = coin::mint_for_testing<SUI>(100, ts::ctx(&mut scenario));
+            game::play(&mut game_obj, &status, &random_obj, wager, ts::ctx(&mut scenario));
+            
+            ts::return_shared(game_obj);
+            ts::return_shared(status);
+            ts::return_shared(random_obj);
+        };
+        
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_multiple_pause_resume_cycles() {
+        let mut scenario = ts::begin(ADMIN);
+        game::init_for_testing(ts::ctx(&mut scenario));
+        
+        ts::next_tx(&mut scenario, ADMIN);
+        {
+            let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
+            
+            // Cycle 1
+            emergency::pause(&admin_cap, &mut status);
+            assert!(emergency::is_paused(&status), 0);
+            emergency::resume(&admin_cap, &mut status);
+            assert!(!emergency::is_paused(&status), 1);
+            
+            // Cycle 2
+            emergency::pause(&admin_cap, &mut status);
+            assert!(emergency::is_paused(&status), 2);
+            emergency::resume(&admin_cap, &mut status);
+            assert!(!emergency::is_paused(&status), 3);
+            
+            ts::return_to_sender(&scenario, admin_cap);
+            ts::return_shared(status);
+        };
+        
+        ts::end(scenario);
+    }
+}

@@ -3,6 +3,11 @@ module magic_swap::reward_pool {
     use sui::coin::{Self, Coin};
     use sui::balance::Balance;
 
+    /// RewardPool stores accumulated fees or extra funds.
+    /// This pool can be used for:
+    /// 1. Staking rewards distribution
+    /// 2. Jackpot payouts (if connected)
+    /// 3. Community treasury reserves
     public struct RewardPool<phantom T> has key {
         id: UID,
         vault: Balance<T>,

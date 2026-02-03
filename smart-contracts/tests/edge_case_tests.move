@@ -4,8 +4,8 @@ module magic_swap::edge_case_tests {
     use sui::balance;
     use sui::sui::SUI;
     
-    // Import modul yang benar
-    use magic_swap::game::{Self, GameHouse, AdminCap};
+    use magic_swap::game::{Self, GameHouse};
+    use magic_swap::admin::{AdminCap};
     use magic_swap::treasury;
 
     #[test]

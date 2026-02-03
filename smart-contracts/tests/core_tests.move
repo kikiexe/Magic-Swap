@@ -2,7 +2,8 @@
 module magic_swap::core_tests {
     use sui::test_scenario::{Self};
     use sui::sui::SUI;
-    use magic_swap::game::{Self, GameHouse, AdminCap};
+    use magic_swap::game::{Self, GameHouse};
+    use magic_swap::admin::{AdminCap};
 
     fun admin(): address { @0xB }
 

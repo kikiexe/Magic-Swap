@@ -8,6 +8,8 @@ module magic_swap::game {
     use magic_swap::randomness;
     use magic_swap::probability_engine;
     use magic_swap::treasury;
+    use magic_swap::emergency::{Self, EmergencyStatus};
+    use magic_swap::admin::{Self, AdminCap};
 
     // --- Events ---
     public struct OutcomeEvent has copy, drop {
@@ -24,14 +26,16 @@ module magic_swap::game {
         admin: address,
     }
 
-    public struct AdminCap has key, store {
-        id: UID,
-    }
+
 
     // --- Init ---
     fun init(ctx: &mut TxContext) {
-        let admin_cap = AdminCap { id: object::new(ctx) };
-        transfer::transfer(admin_cap, ctx.sender());
+        let admin_cap = admin::create_admin_cap(ctx);
+        transfer::public_transfer(admin_cap, ctx.sender());
+
+        // Initialize EmergencyStatus
+        let status = emergency::create(ctx);
+        emergency::share(status);
     }
 
     // --- Admin Functions ---
@@ -66,10 +70,14 @@ module magic_swap::game {
     #[allow(lint(public_entry, public_random))]
     public entry fun play<T>(
         game: &mut GameHouse<T>, 
+        status: &EmergencyStatus,
         r: &Random, 
         coin: Coin<T>, 
         ctx: &mut TxContext
     ) {
+        // Check emergency status
+        emergency::assert_not_paused(status);
+
         let wager_amount = coin.value();
         let mut wager_balance = coin.into_balance();
         

@@ -5,10 +5,11 @@ module magic_swap::integration_tests {
     use sui::sui::SUI;
     use sui::random::{Self, Random};
 
-    // Import modul yang sudah diperbarui
-    use magic_swap::game::{Self, GameHouse, AdminCap};
+    use magic_swap::game::{Self, GameHouse};
+    use magic_swap::admin::{AdminCap};
+    use magic_swap::emergency::{EmergencyStatus};
 
-    // --- Helpers ---
+    // ==================== HELPERS ====================
     fun user(): address { @0xA }
     fun admin(): address { @0xB }
 
@@ -35,36 +36,40 @@ module magic_swap::integration_tests {
         let mut scenario = test_scenario::begin(admin());
         setup_game_environment(&mut scenario);
 
-        // --- Langkah 1: Admin Mengisi Kas (Treasury) ---
-        // Kita isi 1.000 SUI ke dalam GameHouse
+        // ==================== Langkah 1: Admin Mengisi Kas (Treasury) ====================
         test_scenario::next_tx(&mut scenario, admin());
-        let mut game_obj = test_scenario::take_shared<GameHouse<SUI>>(&scenario);
-        let house_fund = coin::mint_for_testing<SUI>(1000, test_scenario::ctx(&mut scenario));
-        game::deposit(&mut game_obj, house_fund);
+        {
+            let mut game_obj = test_scenario::take_shared<GameHouse<SUI>>(&scenario);
+            let house_fund = coin::mint_for_testing<SUI>(1000, test_scenario::ctx(&mut scenario));
+            game::deposit(&mut game_obj, house_fund);
+            test_scenario::return_shared(game_obj);
+        };
 
-        // --- Langkah 2: User Bermain dengan Taruhan Besar ---
-        // User bertaruh 500 SUI
+        // ==================== Langkah 2: User Bermain dengan Taruhan Besar ====================
         test_scenario::next_tx(&mut scenario, user());
-        let wager = coin::mint_for_testing<SUI>(500, test_scenario::ctx(&mut scenario));
-        let r_obj = test_scenario::take_shared<Random>(&scenario);
-        
-        // Panggil fungsi play utama
-        game::play<SUI>(&mut game_obj, &r_obj, wager, test_scenario::ctx(&mut scenario));
+        {
+            let mut game_obj = test_scenario::take_shared<GameHouse<SUI>>(&scenario);
+            let status = test_scenario::take_shared<EmergencyStatus>(&scenario);
+            let r_obj = test_scenario::take_shared<Random>(&scenario);
+            let wager = coin::mint_for_testing<SUI>(500, test_scenario::ctx(&mut scenario));
+            
+            // Panggil fungsi play utama
+            game::play<SUI>(&mut game_obj, &status, &r_obj, wager, test_scenario::ctx(&mut scenario));
+            
+            test_scenario::return_shared(game_obj);
+            test_scenario::return_shared(status);
+            test_scenario::return_shared(r_obj);
+        };
 
-        // --- Langkah 3: Verifikasi Safety Valve (Blueprint Bagian 3) ---
-        // Skenario: Jika user menang Miracle (50x), profit idealnya 24.500 SUI.
-        // Namun, Safety Valve membatasi profit maksimal 10% dari isi kas (10% dari 1.000 = 100).
-        // Jadi, total payout maksimal yang boleh diterima user adalah: 500 (modal) + 100 (cap) = 600 SUI.
+        // ==================== Langkah 3: Verifikasi Safety Valve (Blueprint Bagian 3) ====================
         test_scenario::next_tx(&mut scenario, user());
-        let payout_coin = test_scenario::take_from_sender<Coin<SUI>>(&scenario);
-        
-        // Pastikan sistem melindungi kas bandar
-        assert!(coin::value(&payout_coin) <= 600, 1); 
-
-        // Cleanup
-        test_scenario::return_shared(game_obj);
-        test_scenario::return_shared(r_obj);
-        test_scenario::return_to_sender(&scenario, payout_coin);
+        {
+            let payout_coin = test_scenario::take_from_sender<Coin<SUI>>(&scenario);
+            // Pastikan sistem melindungi kas bandar (Max profit 10% dari 1000 = 100. Total payout 500+100=600)
+            // Note: If user lost, payout is 300 (60% of 500). If won jackpot, capped at 600.
+            assert!(coin::value(&payout_coin) <= 600, 1); 
+            test_scenario::return_to_sender(&scenario, payout_coin);
+        };
         test_scenario::end(scenario);
     }
 
@@ -73,24 +78,34 @@ module magic_swap::integration_tests {
         let mut scenario = test_scenario::begin(admin());
         setup_game_environment(&mut scenario);
 
-        // Admin deposit 100 SUI lalu coba tarik 50 SUI
+        // ==================== Langkah 1: Admin deposit 100 SUI ====================
         test_scenario::next_tx(&mut scenario, admin());
-        let mut game_obj = test_scenario::take_shared<GameHouse<SUI>>(&scenario);
-        let admin_cap = test_scenario::take_from_sender<AdminCap>(&scenario);
+        {
+            let mut game_obj = test_scenario::take_shared<GameHouse<SUI>>(&scenario);
+            game::deposit(&mut game_obj, coin::mint_for_testing<SUI>(100, test_scenario::ctx(&mut scenario)));
+            test_scenario::return_shared(game_obj);
+        };
         
-        game::deposit(&mut game_obj, coin::mint_for_testing<SUI>(100, test_scenario::ctx(&mut scenario)));
-        
+        // ==================== Langkah 2: Admin withdraw 50 SUI ====================
         test_scenario::next_tx(&mut scenario, admin());
-        game::withdraw<SUI>(&admin_cap, &mut game_obj, 50, test_scenario::ctx(&mut scenario));
+        {
+            let admin_cap = test_scenario::take_from_sender<AdminCap>(&scenario);
+            let mut game_obj = test_scenario::take_shared<GameHouse<SUI>>(&scenario);
+            
+            game::withdraw<SUI>(&admin_cap, &mut game_obj, 50, test_scenario::ctx(&mut scenario));
+            
+            test_scenario::return_to_sender(&scenario, admin_cap);
+            test_scenario::return_shared(game_obj);
+        };
 
-        // Verifikasi dana masuk ke admin
+        // ==================== Langkah 3: Verifikasi dana masuk ke admin ====================
         test_scenario::next_tx(&mut scenario, admin());
-        let withdrawn_coin = test_scenario::take_from_sender<Coin<SUI>>(&scenario);
-        assert!(coin::value(&withdrawn_coin) == 50, 2);
+        {
+            let withdrawn_coin = test_scenario::take_from_sender<Coin<SUI>>(&scenario);
+            assert!(coin::value(&withdrawn_coin) == 50, 2);
+            test_scenario::return_to_sender(&scenario, withdrawn_coin);
+        };
 
-        test_scenario::return_shared(game_obj);
-        test_scenario::return_to_sender(&scenario, admin_cap);
-        test_scenario::return_to_sender(&scenario, withdrawn_coin);
         test_scenario::end(scenario);
     }
 }
