@@ -17,6 +17,32 @@ module magic_swap::game {
     use magic_swap::user_stats::{Self, UserStatsRegistry};
     use magic_swap::dynamic_odds;
 
+    // ============ Error Codes ============
+    
+    /// Wager amount is below minimum allowed
+    const EWagerTooSmall: u64 = 101;
+    
+    /// Wager amount exceeds maximum allowed
+    const EWagerTooLarge: u64 = 102;
+    
+    /// Bet too high for current treasury balance (would risk house bankruptcy)
+    const EBetTooHighForTreasury: u64 = 103;
+    
+    /// Treasury balance critically low (emergency pause triggered)
+    const ETreasuryTooLow: u64 = 104;
+    
+    /// Insufficient balance for withdrawal
+    const EInsufficientWithdrawAmount: u64 = 105;
+
+    // ============ Constants ============
+    
+    /// Maximum payout multiplier (9x for MIRACLE tier)
+    /// Used for pre-flight house balance validation
+    const MAX_PAYOUT_MULTIPLIER: u64 = 9;
+    
+    /// Minimum treasury balance before emergency pause (10 SUI)
+    const EMERGENCY_THRESHOLD: u64 = 10_000_000_000;
+
     // ============ Events ============
     
     /// Emitted after each play() call with outcome details.
@@ -94,7 +120,7 @@ module magic_swap::game {
         amount: u64, 
         ctx: &mut TxContext
     ) {
-        assert!(balance::value(&game.house) >= amount, 0); 
+        assert!(balance::value(&game.house) >= amount, EInsufficientWithdrawAmount); 
         let coin = coin::take(&mut game.house, amount, ctx);
         transfer::public_transfer(coin, ctx.sender());
     }
@@ -124,34 +150,36 @@ module magic_swap::game {
         // Step 1: Verify system is not paused
         emergency::assert_not_paused(status);
         
-        // Emergency check: Auto-pause if treasury critically low
-        let emergency_threshold = 10_000_000_000; // 10 SUI minimum
-        if (balance::value(&game.house) < emergency_threshold) {
-            emergency::auto_pause(status);
-            abort 104 // ETreasuryTooLow
-        };
-
         let player = ctx.sender();
         let wager_amount = coin.value();
         
         // Config Validation
         let min = swap_types::min_wager(&game.config);
         let max = swap_types::max_wager(&game.config);
-        assert!(wager_amount >= min, 101); // EWagerTooSmall
-        assert!(wager_amount <= max, 102); // EWagerTooLarge
+        assert!(wager_amount >= min, EWagerTooSmall);
+        assert!(wager_amount <= max, EWagerTooLarge);
+        
+        // CRITICAL PRE-FLIGHT CHECK: Validate house can cover worst-case payout BEFORE processing
+        // This prevents "Miracle Drain" vulnerability where house could go bankrupt
+        let house_val = balance::value(&game.house);
+        
+        // Emergency check: Auto-pause if treasury critically low
+        if (house_val < EMERGENCY_THRESHOLD) {
+            emergency::auto_pause(status);
+            abort ETreasuryTooLow
+        };
+        
+        // Ensure house can cover maximum possible payout (9x MIRACLE win)
+        // Check against GROSS wager to be conservative (before fee deduction)
+        assert!(house_val >= (wager_amount * MAX_PAYOUT_MULTIPLIER), EBetTooHighForTreasury);
 
         let mut wager_balance = coin.into_balance();
         
-        // Step 2: Deduct 1% fee
+        // Step 2: Deduct 1% fee (after validation passes)
         let fee_amount = fee_manager::calculate_fee(wager_amount);
         let fee_balance = balance::split(&mut wager_balance, fee_amount);
         fee_manager::collect_fee_from_balance(fee_vault, fee_balance);
         let net_wager = wager_amount - fee_amount;
-        
-        // CRITICAL: Safety cap check - prevent bets that could bankrupt house
-        let house_balance_val = balance::value(&game.house);
-        let max_possible_payout = net_wager * 9; // Worst case: 9x MIRACLE win
-        assert!(max_possible_payout <= house_balance_val, 103); // EBetTooHighForTreasury
         
         // Step 3: Generate random roll
         let mut gen = randomness::get_generator(r, ctx);

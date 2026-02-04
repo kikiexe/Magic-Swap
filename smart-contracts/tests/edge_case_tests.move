@@ -27,7 +27,7 @@ module magic_swap::edge_case_tests {
     }
 
     #[test]
-    #[expected_failure(abort_code = 0, location = magic_swap::game)] 
+    #[expected_failure(abort_code = 105, location = magic_swap::game)] 
     fun test_withdraw_more_than_available() {
         let mut scenario = test_scenario::begin(@0xB);
         
