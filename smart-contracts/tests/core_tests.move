@@ -1,3 +1,4 @@
+/// Core tests for Magic Swap game initialization.
 #[test_only]
 module magic_swap::core_tests {
     use sui::test_scenario::{Self};
@@ -24,7 +25,7 @@ module magic_swap::core_tests {
         test_scenario::next_tx(&mut scenario, admin());
         {
             let game_house = test_scenario::take_shared<GameHouse<SUI>>(&scenario);
-            // Verifikasi objek berhasil di-share
+            // Verify object was shared successfully
             test_scenario::return_shared(game_house);
         };
         test_scenario::end(scenario);

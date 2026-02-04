@@ -1,69 +1,92 @@
+/// Core gameplay module for Magic Swap protocol.
+/// Handles game initialization, player interactions, and outcome processing.
 module magic_swap::game {
     use sui::coin::{Self, Coin};
     use sui::balance::{Self, Balance};
     use sui::random::Random;
     use sui::event;
     
-    // Memanggil modul pendukung yang sudah kita buat
     use magic_swap::randomness;
     use magic_swap::probability_engine;
     use magic_swap::treasury;
     use magic_swap::emergency::{Self, EmergencyStatus};
+    
     use magic_swap::admin::{Self, AdminCap};
+    use magic_swap::swap_types::{Self, SwapConfig};
     use magic_swap::fee_manager::{Self, FeeVault};
     use magic_swap::user_stats::{Self, UserStatsRegistry};
     use magic_swap::dynamic_odds;
 
-    // --- Events ---
+    // ============ Events ============
+    
+    /// Emitted after each play() call with outcome details.
     public struct OutcomeEvent has copy, drop {
         player: address,
         wager: u64,
         payout: u64,
-        outcome: u8,
+        outcome: u8,         // 0=Loss, 1=SmallWin, 2=MediumWin, 3=Jackpot, 4=Miracle
         fee_collected: u64,
-        odds_mode: u8,
+        odds_mode: u8,       // 0=Critical, 1=Low, 2=Normal, 3=Generous
     }
 
-    // --- Objects ---
+    // ============ Shared Objects ============
+    
+    /// The main game house that holds the treasury.
     public struct GameHouse<phantom T> has key {
         id: UID,
         house: Balance<T>,
         admin: address,
+        config: SwapConfig,
     }
 
-    // --- Init ---
+    // ============ Initialization ============
+    
     fun init(ctx: &mut TxContext) {
+        // Create and transfer AdminCap to deployer
         let admin_cap = admin::create_admin_cap(ctx);
         transfer::public_transfer(admin_cap, ctx.sender());
 
-        // Initialize EmergencyStatus
+        // Create and share EmergencyStatus
         let status = emergency::create(ctx);
         emergency::share(status);
 
-        // Initialize UserStatsRegistry
+        // Create and share UserStatsRegistry
         let registry = user_stats::create_registry(ctx);
         user_stats::share_registry(registry);
     }
 
-    // --- Admin Functions ---
-    /// Create a new game house and its fee vault
+    // ============ Admin Functions ============
+    
+    /// Create a new GameHouse and FeeVault for token type T.
     public fun create_game<T>(_: &AdminCap, ctx: &mut TxContext) {
         let game = GameHouse<T> {
             id: object::new(ctx),
             house: balance::zero(),
             admin: ctx.sender(),
+             // Default config: Min 1 SUI, Max 1000 SUI (MIST units)
+            config: swap_types::create(1_000_000_000, 1000_000_000_000), 
         };
         transfer::share_object(game);
 
-        // Also create and share FeeVault for this token type
         let vault = fee_manager::create_vault<T>(ctx);
         fee_manager::share_vault(vault);
     }
 
+    public fun update_config<T>(
+        _: &AdminCap,
+        game: &mut GameHouse<T>,
+        min: u64,
+        max: u64
+    ) {
+        swap_types::update(&mut game.config, min, max);
+    }
+
+    /// Deposit funds into the game house treasury.
     public fun deposit<T>(game: &mut GameHouse<T>, coin: Coin<T>) {
         balance::join(&mut game.house, coin.into_balance());
     }
 
+    /// Admin withdraws funds from game house treasury.
     #[allow(lint(self_transfer))]
     public fun withdraw<T>(
         _: &AdminCap, 
@@ -76,7 +99,18 @@ module magic_swap::game {
         transfer::public_transfer(coin, ctx.sender());
     }
 
-    // --- Core Gameplay ---
+    // ============ Core Gameplay ============
+    
+    /// Main gameplay function. Player wagers coins and receives payout based on RNG.
+    /// 
+    /// Flow:
+    /// 1. Check emergency pause status
+    /// 2. Deduct 1% operational fee
+    /// 3. Generate random roll (0-999)
+    /// 4. Apply dynamic odds adjustment based on treasury level
+    /// 5. Calculate payout with safety cap (max 10% of treasury)
+    /// 6. Update user statistics
+    /// 7. Transfer payout to player
     #[allow(lint(public_entry, public_random))]
     public entry fun play<T>(
         game: &mut GameHouse<T>,
@@ -87,40 +121,40 @@ module magic_swap::game {
         coin: Coin<T>, 
         ctx: &mut TxContext
     ) {
-        // Check emergency status
+        // Step 1: Verify system is not paused
         emergency::assert_not_paused(status);
 
         let player = ctx.sender();
         let wager_amount = coin.value();
+        
+        // Config Validation
+        let min = swap_types::min_wager(&game.config);
+        let max = swap_types::max_wager(&game.config);
+        assert!(wager_amount >= min, 101); // EWagerTooSmall
+        assert!(wager_amount <= max, 102); // EWagerTooLarge
+
         let mut wager_balance = coin.into_balance();
         
-        // === FEE COLLECTION ===
-        // Deduct 1% fee before gameplay
+        // Step 2: Deduct 1% fee
         let fee_amount = fee_manager::calculate_fee(wager_amount);
         let fee_balance = balance::split(&mut wager_balance, fee_amount);
         fee_manager::collect_fee_from_balance(fee_vault, fee_balance);
-        
-        // Net amount after fee
         let net_wager = wager_amount - fee_amount;
         
-        // Mengambil angka acak 0-999
+        // Step 3: Generate random roll
         let mut gen = randomness::get_generator(r, ctx);
         let base_roll = randomness::roll_dice(&mut gen);
 
-        // === DYNAMIC ODDS ADJUSTMENT ===
-        // Adjust roll based on treasury level (more losses when treasury is low)
+        // Step 4: Apply dynamic odds adjustment
         let odds_mode = dynamic_odds::get_odds_mode(&game.house);
         let adjusted_roll = dynamic_odds::adjust_roll(&game.house, base_roll);
 
-        // Menghitung hadiah berdasarkan Golden Math di Blueprint
-        // NOTE: payout dihitung dari net_wager (setelah fee)
+        // Step 5: Calculate payout
         let (multiplier_bps, outcome_type) = probability_engine::calculate_outcome(adjusted_roll);
         let ideal_payout = (net_wager * multiplier_bps) / 100;
-
-        // Validasi Safety Valve 10% agar bandar tidak bangkrut
         let final_payout = treasury::check_safety_cap(&game.house, ideal_payout, net_wager);
 
-        // Proses pembagian dana
+        // Process fund transfer based on outcome
         if (final_payout > net_wager) {
             let diff = final_payout - net_wager;
             balance::join(&mut wager_balance, balance::split(&mut game.house, diff));
@@ -129,10 +163,10 @@ module magic_swap::game {
             balance::join(&mut game.house, balance::split(&mut wager_balance, diff));
         };
 
-        // === UPDATE USER STATS ===
+        // Step 6: Update user stats
         user_stats::update_stats(stats_registry, player, wager_amount, final_payout, outcome_type);
 
-        // Mengirim koin hasil permainan ke user
+        // Step 7: Transfer payout to player
         transfer::public_transfer(coin::from_balance(wager_balance, ctx), ctx.sender());
 
         event::emit(OutcomeEvent {
@@ -145,7 +179,9 @@ module magic_swap::game {
         });
     }
 
-    // --- View Functions ---
+    // ============ View Functions ============
+    
+    /// Get current treasury balance.
     public fun get_house_balance<T>(game: &GameHouse<T>): u64 {
         balance::value(&game.house)
     }

@@ -1,3 +1,5 @@
+/// Emergency system tests for Magic Swap.
+/// Tests pause/resume functionality and play() behavior when paused.
 #[test_only]
 module magic_swap::emergency_tests {
     use sui::test_scenario::{Self as ts, Scenario};
@@ -11,18 +13,19 @@ module magic_swap::emergency_tests {
     use magic_swap::fee_manager::{FeeVault};
     use magic_swap::user_stats::{UserStatsRegistry};
 
-    // ==================== TEST ADDRESSES ====================
+    // ============ Test Addresses ============
     const ADMIN: address = @0xAD;
     const PLAYER: address = @0xA1;
 
-    // ==================== HELPERS ====================
+    // ============ Helpers ============
     
+    /// Setup full game environment with all shared objects.
     fun setup_full_environment(scenario: &mut Scenario) {
-        // 1. Init contract (creates AdminCap + EmergencyStatus + UserStatsRegistry)
+        // Step 1: Initialize contract
         ts::next_tx(scenario, ADMIN);
         game::init_for_testing(ts::ctx(scenario));
         
-        // 2. Create GameHouse + FeeVault
+        // Step 2: Create GameHouse + FeeVault
         ts::next_tx(scenario, ADMIN);
         let admin_cap = ts::take_from_sender<AdminCap>(scenario);
         game::create_game<SUI>(&admin_cap, ts::ctx(scenario));
@@ -31,22 +34,22 @@ module magic_swap::emergency_tests {
         // 3. Fund house
         ts::next_tx(scenario, ADMIN);
         let mut game_obj = ts::take_shared<GameHouse<SUI>>(scenario);
-        let funding = coin::mint_for_testing<SUI>(10000, ts::ctx(scenario));
+        // Fund with 1000 SUI (1 SUI = 1,000,000,000 MIST)
+        let funding = coin::mint_for_testing<SUI>(1000_000_000_000, ts::ctx(scenario));
         game::deposit(&mut game_obj, funding);
         ts::return_shared(game_obj);
 
-        // 4. Initialize Random object
+        // Step 4: Initialize Random object
         ts::next_tx(scenario, @0x0);
         random::create_for_testing(ts::ctx(scenario));
     }
 
-    // ==================== TESTS ====================
+    // ============ Emergency Status Tests ============
 
     #[test]
     fun test_emergency_status_created() {
         let mut scenario = ts::begin(ADMIN);
         
-        // Init creates EmergencyStatus
         game::init_for_testing(ts::ctx(&mut scenario));
         
         ts::next_tx(&mut scenario, ADMIN);
@@ -72,13 +75,10 @@ module magic_swap::emergency_tests {
             let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
             let mut status = ts::take_shared<EmergencyStatus>(&scenario);
             
-            // Initially unpaused
             assert!(!emergency::is_paused(&status), 0);
             
-            // Admin pauses
             emergency::pause(&admin_cap, &mut status);
             
-            // Now paused
             assert!(emergency::is_paused(&status), 1);
             
             ts::return_to_sender(&scenario, admin_cap);
@@ -98,11 +98,9 @@ module magic_swap::emergency_tests {
             let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
             let mut status = ts::take_shared<EmergencyStatus>(&scenario);
             
-            // Pause first
             emergency::pause(&admin_cap, &mut status);
             assert!(emergency::is_paused(&status), 0);
             
-            // Then resume
             emergency::resume(&admin_cap, &mut status);
             assert!(!emergency::is_paused(&status), 1);
             
@@ -123,14 +121,11 @@ module magic_swap::emergency_tests {
             let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
             let mut status = ts::take_shared<EmergencyStatus>(&scenario);
             
-            // Start: unpaused
             assert!(!emergency::is_paused(&status), 0);
             
-            // Toggle -> paused
             emergency::toggle(&admin_cap, &mut status);
             assert!(emergency::is_paused(&status), 1);
             
-            // Toggle -> unpaused
             emergency::toggle(&admin_cap, &mut status);
             assert!(!emergency::is_paused(&status), 2);
             
@@ -141,12 +136,13 @@ module magic_swap::emergency_tests {
         ts::end(scenario);
     }
 
+    // ============ Play Behavior Tests ============
+
     #[test]
     fun test_play_succeeds_when_not_paused() {
         let mut scenario = ts::begin(ADMIN);
         setup_full_environment(&mut scenario);
         
-        // Player plays when system active
         ts::next_tx(&mut scenario, PLAYER);
         {
             let mut game_obj = ts::take_shared<GameHouse<SUI>>(&scenario);
@@ -155,9 +151,10 @@ module magic_swap::emergency_tests {
             let status = ts::take_shared<EmergencyStatus>(&scenario);
             let random_obj = ts::take_shared<random::Random>(&scenario);
             
-            let wager = coin::mint_for_testing<SUI>(100, ts::ctx(&mut scenario));
+            // Wager 1 SUI
+            let wager = coin::mint_for_testing<SUI>(1_000_000_000, ts::ctx(&mut scenario));
             
-            // Should succeed (system not paused)
+            // Should succeed (system not paused) (100)
             game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &status, &random_obj, wager, ts::ctx(&mut scenario));
             
             ts::return_shared(game_obj);
@@ -167,11 +164,9 @@ module magic_swap::emergency_tests {
             ts::return_shared(random_obj);
         };
         
-        // Verify player received payout
         ts::next_tx(&mut scenario, PLAYER);
         {
             let payout = ts::take_from_sender<coin::Coin<SUI>>(&scenario);
-            // Payout should exist (either win or loss refund)
             assert!(coin::value(&payout) > 0, 0);
             ts::return_to_sender(&scenario, payout);
         };
@@ -185,7 +180,7 @@ module magic_swap::emergency_tests {
         let mut scenario = ts::begin(ADMIN);
         setup_full_environment(&mut scenario);
         
-        // Admin pauses system
+        // Admin pauses
         ts::next_tx(&mut scenario, ADMIN);
         {
             let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
@@ -206,9 +201,10 @@ module magic_swap::emergency_tests {
             let status = ts::take_shared<EmergencyStatus>(&scenario);
             let random_obj = ts::take_shared<random::Random>(&scenario);
             
-            let wager = coin::mint_for_testing<SUI>(100, ts::ctx(&mut scenario));
+            // Wager 1 SUI
+            let wager = coin::mint_for_testing<SUI>(1_000_000_000, ts::ctx(&mut scenario));
             
-            // This should ABORT with code 100 (ESystemPaused)
+            // Should abort with ESystemPaused (100)
             game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &status, &random_obj, wager, ts::ctx(&mut scenario));
             
             ts::return_shared(game_obj);
@@ -255,7 +251,8 @@ module magic_swap::emergency_tests {
             let status = ts::take_shared<EmergencyStatus>(&scenario);
             let random_obj = ts::take_shared<random::Random>(&scenario);
             
-            let wager = coin::mint_for_testing<SUI>(100, ts::ctx(&mut scenario));
+            // Wager 1 SUI
+            let wager = coin::mint_for_testing<SUI>(1_000_000_000, ts::ctx(&mut scenario));
             game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &status, &random_obj, wager, ts::ctx(&mut scenario));
             
             ts::return_shared(game_obj);

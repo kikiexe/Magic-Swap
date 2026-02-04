@@ -1,17 +1,20 @@
+/// Fee management module for Magic Swap.
+/// Handles 1% operational fee collection and admin withdrawals.
 module magic_swap::fee_manager {
     use sui::coin;
     use sui::balance::{Self, Balance};
     use magic_swap::admin::AdminCap;
 
-    // --- Constants ---
-    /// Operational fee: 1% (100 basis points out of 10000)
+    // ============ Constants ============
+    /// Operational fee: 1% (100 basis points)
     const OPERATIONAL_FEE_BPS: u64 = 100;
 
-    // --- Error Codes ---
+    // ============ Error Codes ============
     const EInsufficientFees: u64 = 200;
 
-    // --- Objects ---
-    /// FeeVault stores collected fees from gameplay
+    // ============ Structs ============
+    
+    /// Vault storing collected fees.
     public struct FeeVault<phantom T> has key {
         id: UID,
         collected_fees: Balance<T>,
@@ -19,8 +22,9 @@ module magic_swap::fee_manager {
         total_withdrawn: u64,
     }
 
-    // --- Init Helper ---
-    /// Create a new FeeVault (called from main module init)
+    // ============ Package Functions ============
+    
+    /// Create a new FeeVault.
     public(package) fun create_vault<T>(ctx: &mut TxContext): FeeVault<T> {
         FeeVault<T> {
             id: object::new(ctx),
@@ -30,25 +34,12 @@ module magic_swap::fee_manager {
         }
     }
 
-    /// Share the vault as a shared object
+    /// Share vault as shared object.
     public(package) fun share_vault<T>(vault: FeeVault<T>) {
         transfer::share_object(vault);
     }
 
-    // --- Fee Calculation ---
-    /// Calculate fee amount based on wager (1% = 100 BPS)
-    public fun calculate_fee(amount: u64): u64 {
-        (amount * OPERATIONAL_FEE_BPS) / 10000
-    }
-
-    /// Get net amount after fee deduction
-    public fun get_net_amount(amount: u64): (u64, u64) {
-        let fee = calculate_fee(amount);
-        (amount - fee, fee)
-    }
-
-    // --- Fee Collection ---
-    /// Collect fee from a balance (internal use)
+    /// Collect fee from a balance.
     public(package) fun collect_fee_from_balance<T>(
         vault: &mut FeeVault<T>,
         fee_balance: Balance<T>
@@ -58,8 +49,23 @@ module magic_swap::fee_manager {
         balance::join(&mut vault.collected_fees, fee_balance);
     }
 
-    // --- Admin Functions ---
-    /// Withdraw collected fees to admin wallet
+    // ============ Fee Calculation ============
+    
+    /// Calculate fee amount (1% of wager).
+    public fun calculate_fee(amount: u64): u64 {
+        (amount * OPERATIONAL_FEE_BPS) / 10000
+    }
+
+    /// Get net amount after fee deduction.
+    /// Returns: (net_amount, fee_amount)
+    public fun get_net_amount(amount: u64): (u64, u64) {
+        let fee = calculate_fee(amount);
+        (amount - fee, fee)
+    }
+
+    // ============ Admin Functions ============
+    
+    /// Withdraw specific amount of fees.
     #[allow(lint(self_transfer))]
     public fun withdraw_fees<T>(
         _: &AdminCap,
@@ -74,7 +80,7 @@ module magic_swap::fee_manager {
         transfer::public_transfer(withdrawn, ctx.sender());
     }
 
-    /// Withdraw all collected fees
+    /// Withdraw all collected fees.
     #[allow(lint(self_transfer))]
     public fun withdraw_all_fees<T>(
         _: &AdminCap,
@@ -89,28 +95,25 @@ module magic_swap::fee_manager {
         }
     }
 
-    // --- View Functions ---
-    /// Get current fee balance
+    // ============ View Functions ============
+    
     public fun get_fee_balance<T>(vault: &FeeVault<T>): u64 {
         balance::value(&vault.collected_fees)
     }
 
-    /// Get total collected fees (lifetime)
     public fun get_total_collected<T>(vault: &FeeVault<T>): u64 {
         vault.total_collected
     }
 
-    /// Get total withdrawn fees (lifetime)
     public fun get_total_withdrawn<T>(vault: &FeeVault<T>): u64 {
         vault.total_withdrawn
     }
 
-    /// Get fee rate in BPS
     public fun get_fee_rate_bps(): u64 {
         OPERATIONAL_FEE_BPS
     }
 
-    // --- Test Helpers ---
+    // ============ Test Helpers ============
     #[test_only]
     public fun create_vault_for_testing<T>(ctx: &mut TxContext): FeeVault<T> {
         create_vault<T>(ctx)
