@@ -39,7 +39,7 @@ module magic_swap::user_stats_tests {
             assert!(!user_stats::has_stats(&registry, USER_A), 0);
             
             // First update creates user
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 600, 0);
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 600, 0, 0);
             
             assert!(user_stats::has_stats(&registry, USER_A), 1);
             assert!(user_stats::get_total_players(&registry) == 1, 2);
@@ -60,7 +60,7 @@ module magic_swap::user_stats_tests {
             );
             
             // Wager 1000, payout 600, tier 0 (LOSS)
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 600, 0);
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 600, 0, 0);
             
             let stats = user_stats::get_stats(&registry, USER_A);
             assert!(user_stats::get_total_wagered(&stats) == 1000, 0);
@@ -87,7 +87,7 @@ module magic_swap::user_stats_tests {
             );
             
             // Wager 1000, payout 1050, tier 1 (SMALL WIN)
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 1050, 1);
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 1050, 1, 0);
             
             let stats = user_stats::get_stats(&registry, USER_A);
             assert!(user_stats::get_win_count(&stats) == 1, 0);
@@ -110,12 +110,12 @@ module magic_swap::user_stats_tests {
                 test_scenario::ctx(&mut scenario)
             );
             
-            // Game 1: Loss
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 600, 0);
-            // Game 2: Small Win
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 500, 525, 1);
-            // Game 3: Medium Win
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 200, 300, 2);
+            // Game 1: Loss (epoch 0)
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 600, 0, 0);
+            // Game 2: Small Win (epoch 2)
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 500, 525, 1, 2);
+            // Game 3: Medium Win (epoch 4)
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 200, 300, 2, 4);
             
             let stats = user_stats::get_stats(&registry, USER_A);
             
@@ -145,8 +145,8 @@ module magic_swap::user_stats_tests {
                 test_scenario::ctx(&mut scenario)
             );
             
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 600, 0);
-            user_stats::update_stats_for_testing(&mut registry, USER_B, 500, 525, 1);
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 600, 0, 0);
+            user_stats::update_stats_for_testing(&mut registry, USER_B, 500, 525, 1, 0);
             
             assert!(user_stats::get_total_players(&registry) == 2, 0);
             assert!(user_stats::get_total_games(&registry) == 2, 1);
@@ -170,12 +170,12 @@ module magic_swap::user_stats_tests {
                 test_scenario::ctx(&mut scenario)
             );
             
-            // One game per tier
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 100, 60, 0);
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 100, 105, 1);
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 100, 150, 2);
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 100, 800, 3);
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 100, 5000, 4);
+            // One game per tier (increment epoch by 2 each time)
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 100, 60, 0, 0);
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 100, 105, 1, 2);
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 100, 150, 2, 4);
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 100, 600, 3, 6);
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 100, 900, 4, 8);
             
             let stats = user_stats::get_stats(&registry, USER_A);
             let tier_counts = user_stats::get_tier_counts(&stats);
@@ -212,8 +212,8 @@ module magic_swap::user_stats_tests {
                 test_scenario::ctx(&mut scenario)
             );
             
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 600, 0);
-            user_stats::update_stats_for_testing(&mut registry, USER_A, 500, 525, 1);
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 1000, 600, 0, 0);
+            user_stats::update_stats_for_testing(&mut registry, USER_A, 500, 525, 1, 2);
             
             let stats = user_stats::get_stats(&registry, USER_A);
             assert!(user_stats::get_games_played(&stats) == 2, 0);

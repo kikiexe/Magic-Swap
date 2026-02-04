@@ -14,6 +14,7 @@ module magic_swap::user_stats {
         tier_counts: vector<u64>,  // [loss, small, medium, jackpot, miracle]
         net_profit: u64,
         is_profit: bool,
+        last_play_timestamp: u64,  // Anti-spam: track last play epoch
     }
 
     /// Global registry storing all user stats.
@@ -48,6 +49,7 @@ module magic_swap::user_stats {
         wager: u64,
         payout: u64,
         outcome_tier: u8,
+        current_epoch: u64,
     ) {
         // Auto-create user if new
         if (!table::contains(&registry.stats, player)) {
@@ -58,6 +60,7 @@ module magic_swap::user_stats {
                 tier_counts: vector[0, 0, 0, 0, 0],
                 net_profit: 0,
                 is_profit: true,
+                last_play_timestamp: 0,
             };
             table::add(&mut registry.stats, player, new_stats);
             registry.total_players = registry.total_players + 1;
@@ -65,10 +68,17 @@ module magic_swap::user_stats {
 
         let stats = table::borrow_mut(&mut registry.stats, player);
         
+        // Anti-spam cooldown check (minimum 2 epochs between plays)
+        // Skip check for first play (last_play_timestamp == 0)
+        if (stats.last_play_timestamp > 0) {
+            assert!(current_epoch >= stats.last_play_timestamp + 2, 999); // ERR_COOLDOWN
+        };
+        
         // Update basic stats
         stats.total_wagered = stats.total_wagered + wager;
         stats.total_payout = stats.total_payout + payout;
         stats.games_played = stats.games_played + 1;
+        stats.last_play_timestamp = current_epoch;
         
         // Update tier count
         let tier_idx = (outcome_tier as u64);
@@ -106,6 +116,7 @@ module magic_swap::user_stats {
                 tier_counts: vector[0, 0, 0, 0, 0],
                 net_profit: 0,
                 is_profit: true,
+                last_play_timestamp: 0,
             }
         }
     }
@@ -143,6 +154,7 @@ module magic_swap::user_stats {
             stats.tier_counts = vector[0, 0, 0, 0, 0];
             stats.net_profit = 0;
             stats.is_profit = true;
+            stats.last_play_timestamp = 0;
         }
     }
 
@@ -166,7 +178,8 @@ module magic_swap::user_stats {
         wager: u64,
         payout: u64,
         outcome_tier: u8,
+        current_epoch: u64,
     ) {
-        update_stats(registry, player, wager, payout, outcome_tier)
+        update_stats(registry, player, wager, payout, outcome_tier, current_epoch)
     }
 }

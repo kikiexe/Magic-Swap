@@ -55,4 +55,12 @@ module magic_swap::emergency {
     public fun toggle(_: &AdminCap, status: &mut EmergencyStatus) {
         status.is_paused = !status.is_paused;
     }
+
+    // ============ Auto-Pause Functions ============
+    
+    /// Auto-pause system when treasury is critically low.
+    /// Can be called by game logic without AdminCap.
+    public(package) fun auto_pause(status: &mut EmergencyStatus) {
+        status.is_paused = true;
+    }
 }

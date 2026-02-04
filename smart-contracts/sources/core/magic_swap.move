@@ -116,13 +116,20 @@ module magic_swap::game {
         game: &mut GameHouse<T>,
         fee_vault: &mut FeeVault<T>,
         stats_registry: &mut UserStatsRegistry,
-        status: &EmergencyStatus,
+        status: &mut EmergencyStatus,
         r: &Random, 
         coin: Coin<T>, 
         ctx: &mut TxContext
     ) {
         // Step 1: Verify system is not paused
         emergency::assert_not_paused(status);
+        
+        // Emergency check: Auto-pause if treasury critically low
+        let emergency_threshold = 10_000_000_000; // 10 SUI minimum
+        if (balance::value(&game.house) < emergency_threshold) {
+            emergency::auto_pause(status);
+            abort 104 // ETreasuryTooLow
+        };
 
         let player = ctx.sender();
         let wager_amount = coin.value();
@@ -140,6 +147,11 @@ module magic_swap::game {
         let fee_balance = balance::split(&mut wager_balance, fee_amount);
         fee_manager::collect_fee_from_balance(fee_vault, fee_balance);
         let net_wager = wager_amount - fee_amount;
+        
+        // CRITICAL: Safety cap check - prevent bets that could bankrupt house
+        let house_balance_val = balance::value(&game.house);
+        let max_possible_payout = net_wager * 9; // Worst case: 9x MIRACLE win
+        assert!(max_possible_payout <= house_balance_val, 103); // EBetTooHighForTreasury
         
         // Step 3: Generate random roll
         let mut gen = randomness::get_generator(r, ctx);
@@ -163,8 +175,9 @@ module magic_swap::game {
             balance::join(&mut game.house, balance::split(&mut wager_balance, diff));
         };
 
-        // Step 6: Update user stats
-        user_stats::update_stats(stats_registry, player, wager_amount, final_payout, outcome_type);
+        // Step 6: Update user stats with cooldown check
+        let current_epoch = ctx.epoch();
+        user_stats::update_stats(stats_registry, player, wager_amount, final_payout, outcome_type, current_epoch);
 
         // Step 7: Transfer payout to player
         transfer::public_transfer(coin::from_balance(wager_balance, ctx), ctx.sender());

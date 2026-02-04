@@ -54,7 +54,7 @@ module magic_swap::emergency_tests {
         
         ts::next_tx(&mut scenario, ADMIN);
         {
-            let status = ts::take_shared<EmergencyStatus>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
             
             // Should start unpaused
             assert!(!emergency::is_paused(&status), 0);
@@ -148,14 +148,14 @@ module magic_swap::emergency_tests {
             let mut game_obj = ts::take_shared<GameHouse<SUI>>(&scenario);
             let mut fee_vault = ts::take_shared<FeeVault<SUI>>(&scenario);
             let mut stats_registry = ts::take_shared<UserStatsRegistry>(&scenario);
-            let status = ts::take_shared<EmergencyStatus>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
             let random_obj = ts::take_shared<random::Random>(&scenario);
             
             // Wager 1 SUI
             let wager = coin::mint_for_testing<SUI>(1_000_000_000, ts::ctx(&mut scenario));
             
             // Should succeed (system not paused) (100)
-            game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &status, &random_obj, wager, ts::ctx(&mut scenario));
+            game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &mut status, &random_obj, wager, ts::ctx(&mut scenario));
             
             ts::return_shared(game_obj);
             ts::return_shared(fee_vault);
@@ -198,14 +198,14 @@ module magic_swap::emergency_tests {
             let mut game_obj = ts::take_shared<GameHouse<SUI>>(&scenario);
             let mut fee_vault = ts::take_shared<FeeVault<SUI>>(&scenario);
             let mut stats_registry = ts::take_shared<UserStatsRegistry>(&scenario);
-            let status = ts::take_shared<EmergencyStatus>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
             let random_obj = ts::take_shared<random::Random>(&scenario);
             
             // Wager 1 SUI
             let wager = coin::mint_for_testing<SUI>(1_000_000_000, ts::ctx(&mut scenario));
             
             // Should abort with ESystemPaused (100)
-            game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &status, &random_obj, wager, ts::ctx(&mut scenario));
+            game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &mut status, &random_obj, wager, ts::ctx(&mut scenario));
             
             ts::return_shared(game_obj);
             ts::return_shared(fee_vault);
@@ -248,12 +248,12 @@ module magic_swap::emergency_tests {
             let mut game_obj = ts::take_shared<GameHouse<SUI>>(&scenario);
             let mut fee_vault = ts::take_shared<FeeVault<SUI>>(&scenario);
             let mut stats_registry = ts::take_shared<UserStatsRegistry>(&scenario);
-            let status = ts::take_shared<EmergencyStatus>(&scenario);
+            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
             let random_obj = ts::take_shared<random::Random>(&scenario);
             
             // Wager 1 SUI
             let wager = coin::mint_for_testing<SUI>(1_000_000_000, ts::ctx(&mut scenario));
-            game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &status, &random_obj, wager, ts::ctx(&mut scenario));
+            game::play(&mut game_obj, &mut fee_vault, &mut stats_registry, &mut status, &random_obj, wager, ts::ctx(&mut scenario));
             
             ts::return_shared(game_obj);
             ts::return_shared(fee_vault);

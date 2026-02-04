@@ -52,22 +52,22 @@ module magic_swap::integration_tests {
             test_scenario::return_shared(game_obj);
         };
 
-        // Step 2: User plays with a large wager
+        // Step 2: User plays with a wager
         test_scenario::next_tx(&mut scenario, user());
         {
             let mut game_obj = test_scenario::take_shared<GameHouse<SUI>>(&scenario);
             let mut fee_vault = test_scenario::take_shared<FeeVault<SUI>>(&scenario);
             let mut stats_registry = test_scenario::take_shared<UserStatsRegistry>(&scenario);
-            let status = test_scenario::take_shared<EmergencyStatus>(&scenario);
+            let mut status = test_scenario::take_shared<EmergencyStatus>(&scenario);
             let r_obj = test_scenario::take_shared<Random>(&scenario);
-            // Wager: 500 SUI
-            let wager = coin::mint_for_testing<SUI>(500_000_000_000, test_scenario::ctx(&mut scenario));
+            // Wager: 100 SUI (safe for 1000 SUI treasury, max payout 900 SUI)
+            let wager = coin::mint_for_testing<SUI>(100_000_000_000, test_scenario::ctx(&mut scenario));
             
             game::play<SUI>(
                 &mut game_obj, 
                 &mut fee_vault,
                 &mut stats_registry,
-                &status, 
+                &mut status, 
                 &r_obj, 
                 wager, 
                 test_scenario::ctx(&mut scenario)
@@ -86,11 +86,11 @@ module magic_swap::integration_tests {
             let payout_coin = test_scenario::take_from_sender<Coin<SUI>>(&scenario);
             // Skenario: 
             // Treasury: 1000 SUI
-            // Wager: 500 SUI
+            // Wager: 100 SUI (after 1% fee = 99 SUI net)
             // Max Profit Allowed = 10% of 1000 SUI = 100 SUI
-            // Max Payout = Wager + Max Profit = 500 + 100 = 600 SUI
-            // 600 SUI = 600_000_000_000 MIST
-            assert!(coin::value(&payout_coin) <= 600_000_000_000, 1); 
+            // Max Payout = Net Wager + Max Profit = 99 + 100 = 199 SUI
+            // 199 SUI = 199_000_000_000 MIST
+            assert!(coin::value(&payout_coin) <= 199_000_000_000, 1); 
             test_scenario::return_to_sender(&scenario, payout_coin);
         };
         test_scenario::end(scenario);
