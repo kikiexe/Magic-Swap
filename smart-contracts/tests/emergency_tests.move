@@ -54,7 +54,7 @@ module magic_swap::emergency_tests {
         
         ts::next_tx(&mut scenario, ADMIN);
         {
-            let mut status = ts::take_shared<EmergencyStatus>(&scenario);
+            let status = ts::take_shared<EmergencyStatus>(&scenario);
             
             // Should start unpaused
             assert!(!emergency::is_paused(&status), 0);
