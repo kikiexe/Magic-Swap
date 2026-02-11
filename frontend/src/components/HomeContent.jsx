@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
-import { Wallet, LogOut } from 'lucide-react';
-import { ConnectButton } from '@mysten/dapp-kit';
-import SwapCard from './components/SwapCard';
-import OutcomePopup from './components/OutcomePopup';
-import SuiProvider from './providers/SuiProvider';
-import { useWallet } from './hooks/useWallet';
-import './App.css';
+'use client';
 
-function AppContent() {
+import React, { useState } from 'react';
+import { LogOut } from 'lucide-react';
+import { ConnectButton } from '@mysten/dapp-kit';
+import SwapCard from './SwapCard';
+import OutcomePopup from './OutcomePopup';
+import { useWallet } from '../hooks/useWallet';
+
+export default function HomeContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [swapResult, setSwapResult] = useState(null);
   const { address, isConnected, balance, disconnect } = useWallet();
@@ -72,13 +72,3 @@ function AppContent() {
     </div>
   );
 }
-
-function App() {
-  return (
-    <SuiProvider>
-      <AppContent />
-    </SuiProvider>
-  );
-}
-
-export default App;

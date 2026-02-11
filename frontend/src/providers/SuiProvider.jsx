@@ -1,3 +1,5 @@
+'use client';
+
 import { createNetworkConfig, SuiClientProvider, WalletProvider } from '@mysten/dapp-kit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { getFullnodeUrl } from '@mysten/sui.js/client';
